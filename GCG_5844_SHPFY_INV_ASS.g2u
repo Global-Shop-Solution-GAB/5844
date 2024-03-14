@@ -1,0 +1,240 @@
+﻿Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+'TJS February 2020
+'Customer: Benchmark Media Systems
+'This program is used to ensure a correlation between Shopify Product IDs and Global Shop part numbers.  
+'This relies on GS part numbers being stored as variant SKUs in Shopify.
+
+F.Intrinsic.UI.InvokeWaitDialog("Gathering Product Data from Shopify","Please wait")
+'Wiping out the current data to start fresh
+F.Intrinsic.Control.CallSub(ClearTable)
+
+'This grabs the data in the global shop system so that it knows whats already been grabbed from the website.
+F.Intrinsic.Control.CallSub(PartAssoc)
+F.Intrinsic.Control.CallSub(PartGathering)
+F.Intrinsic.UI.ChangeWaitStatus("Saving Product Associations")
+F.Intrinsic.Control.CallSub(SaveInfo)
+F.Intrinsic.UI.CloseWaitDialog
+F.Intrinsic.Control.CallSub(Unload)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.ClearTable.Start
+F.Intrinsic.Control.Try
+
+F.ODBC.Connection!conts.OpenCompanyConnection
+
+F.ODBC.Connection!conts.Execute("delete GCG_5844_INV_ASSOC")
+
+F.ODBC.Connection!conts.Close
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.ClearTable.End
+
+Program.Sub.PartGathering.Start
+F.Intrinsic.Control.Try
+V.Local.sUser.Declare(String,"")
+V.Local.sPass.Declare(String,"")
+V.Local.sURL.Declare(String,"")
+V.Local.sFile.Declare(String,"")
+V.Local.sRet.Declare(String,"")
+V.Local.sData.Declare(String,"")
+V.Local.sHeadPath.Declare(String,"")
+V.Local.sTemp.Declare(String,"")
+V.Local.sPartID.Declare(String,"")
+V.Local.sFilter.Declare(String,"")
+V.Local.sLinePath.Declare(String,"")
+V.Local.bFlag.Declare(Boolean,False)
+V.Local.iLine.Declare(Long,0)
+V.Local.sSetPage.Declare(String,"")
+V.Local.sPage.Declare(String,"")
+V.Local.bNextPage.Declare(Boolean,False)
+V.Local.sVariant.Declare(String,"")
+V.Local.iVar.Declare(Long,0)
+V.Local.iCNT.Declare(Long,0)
+V.Local.sSQL.Declare(String,"")
+V.Local.sVersion.Declare(String,"")
+
+' ----------------------------------------------------------------------------------------------------------------------
+
+' 3/1/2024 - Cruz Marrujo - BEN230-22920241101-0
+' Updating this program with the logic below to acquire the Shopify version proactively so that it is set for the URL dynamically rather than statically
+F.ODBC.Connection!conts.OpenCompanyConnection
+F.ODBC.Connection!conts.ExecuteAndReturn("Select RTRIM(APIKEY) as APIKEY,RTRIM(APIPASS) as APIPASS,RTRIM(SHOPIFY_VER) as SHOPIFY_VER from GCG_5844_API where REC_ID=1",V.Local.sSQL)
+F.Intrinsic.String.Split(V.Local.sSQL,"*!*",V.Local.sSQL)
+V.Local.sUser.Set(V.Local.sSQL(0).Trim)
+V.Local.sPass.Set(V.Local.sSQL(1).Trim)
+'F.Intrinsic.String.Format(V.Local.sSql(2).Trim,"YYYY-MM-DD",V.Local.sSinceDate)
+'F.Intrinsic.String.Build("{0}T00:00:00-05:00",V.Local.sSinceDate,V.Local.sSinceDate)
+V.Local.sVersion.Set(V.Local.sSQL(2).Trim)
+V.Local.sSQL.Redim(0,0)
+F.Intrinsic.String.WeakDecryption(V.Local.sUser,V.Local.sUser)
+F.Intrinsic.String.WeakDecryption(V.Local.sPass,V.Local.sPass)
+F.ODBC.Connection!conts.Close
+
+F.Intrinsic.Control.If(V.Args.Page.Exists)
+	V.Local.sURL.Set(V.Args.Page)
+F.Intrinsic.Control.Else
+'	V.Local.sURL.Set("https://benchmarkmedia.myshopify.com/admin/api/2020-01/variants.json?limit=50")
+	F.Intrinsic.String.Build("https://benchmarkmedia.myshopify.com/admin/api/{0}/variants.json?limit=50",V.Local.sVersion,V.Local.sURL)
+F.Intrinsic.Control.EndIf
+
+'F.ODBC.Connection!conts.OpenCompanyConnection
+'F.ODBC.Connection!conts.ExecuteAndReturn("Select RTRIM(APIKEY) as APIKEY,RTRIM(APIPASS) as APIPASS from GCG_5844_API where REC_ID=1",V.Local.sSQL)
+'F.Intrinsic.String.Split(V.Local.sSQL,"*!*",V.Local.sSQL)
+'V.Local.sUser.Set(V.Local.sSQL(0).Trim)
+'V.Local.sPass.Set(V.Local.sSQL(1).Trim)
+'V.Local.sSQL.Redim(0,0)
+'F.Intrinsic.String.WeakDecryption(V.Local.sUser,V.Local.sUser)
+'F.Intrinsic.String.WeakDecryption(V.Local.sPass,V.Local.sPass)
+'F.ODBC.Connection!conts.Close
+
+' -----------------------------------------------------------------------------------------------------------------------
+
+F.Intrinsic.String.Build("{0}\{1}PRODUCTS.json",V.Caller.TempDir,V.Caller.CompanyCode,V.Local.sFile)
+
+F.Communication.REST.SetProperty("HTTPMethod","GET")
+F.Communication.REST.SetProperty("User",V.Local.sUser)
+F.Communication.REST.SetProperty("Password",V.Local.sPass)
+F.Communication.REST.SetProperty("ContentType","application/json; charset=utf-8")
+F.Communication.REST.SetProperty("Accept","application/json")
+F.Communication.REST.SetProperty("LocalFile",V.Local.sFile)
+F.Communication.REST.Config("SSLEnabledProtocols=4032",V.Local.sRet)
+
+F.Communication.REST.Get(V.Local.sURL)
+
+F.Communication.REST.DoEvents()
+F.Communication.REST.ReadProperty("TransferredData",V.Local.sData)
+
+F.Communication.JSON.ParseFile(V.Local.sFile)
+V.Local.iLine.Set(1)
+F.Intrinsic.String.Build("/json/variants/[{0}]",V.Local.iLine,V.Local.sHeadPath)
+F.Communication.JSON.HasXPath(V.Local.sHeadPath,V.Local.bFlag)
+
+'This portion is needed to get the next page
+F.Communication.REST.ReadProperty("PARSEDHEADERS",V.Local.sSetPage)
+' 3/4/2024 - Cruz Marrujo - BEN230-22920241101-0
+' Shopify changed from not capitalizing Link to all of the sudden capitalizing it, so we have to use value 1 in the CaseInt argument
+'F.Intrinsic.String.DoubleDelimitedSeek(V.Local.sSetPage,"!*!","*!*","Link",0,"",V.Local.sSetPage)
+F.Intrinsic.String.DoubleDelimitedSeek(V.Local.sSetPage,"!*!","*!*","Link",1,"",V.Local.sSetPage)
+F.Intrinsic.String.Split(V.Local.sSetPage,",",V.Local.sSetPage)
+F.Intrinsic.Control.If(V.Local.sSetPage.UBound,=,1)
+	F.Intrinsic.Variable.RemoveArrayElementByOrdinal(V.Local.sSetPage,0,V.Local.sSetPage)
+	V.Local.sSetPage.RedimPreserve(0,0)
+	F.Intrinsic.String.Split(V.Local.sSetPage,";",V.Local.sSetPage)
+	V.Local.sPage.Set(V.Local.sSetPage(0).Trim)
+	V.Local.sSetPage.Redim(0,0)
+	F.Intrinsic.String.Replace(V.Local.sPage,"<","",V.Local.sPage)
+	F.Intrinsic.String.Replace(V.Local.sPage,">","",V.Local.sPage)
+F.Intrinsic.Control.Else
+	F.Intrinsic.String.Split(V.Local.sSetPage,";",V.Local.sSetPage)
+	F.Intrinsic.Control.If(V.Local.sSetPage(1).Trim,=,"rel="previous"")
+		V.Local.sPage.Set(V.Local.sSetPage(0).Trim)
+		V.Local.sSetPage.Redim(0,0)
+		F.Intrinsic.String.Replace(V.Local.sPage,"<","",V.Local.sPage)
+		F.Intrinsic.String.Replace(V.Local.sPage,">","",V.Local.sPage)
+	F.Intrinsic.Control.Else
+		V.Local.sPage.Set(V.Local.sSetPage(0).Trim)
+		V.Local.sSetPage.Redim(0,0)
+		F.Intrinsic.String.Replace(V.Local.sPage,"<","",V.Local.sPage)
+		F.Intrinsic.String.Replace(V.Local.sPage,">","",V.Local.sPage)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.DoUntil(V.Local.bFlag,=,False)
+	'Web Id
+	F.Intrinsic.String.Build("/json/variants/[{0}]/id",V.Local.iLine,V.Local.sTemp)
+	F.Communication.JSON.SetProperty("XPath",V.Local.sTemp)
+	F.Communication.JSON.ReadProperty("XText",V.Local.sTemp)
+	V.Local.sPartID.Set(V.Local.sTemp.Trim)
+	F.Intrinsic.String.Build("[WEBID] = '{0}'",V.Local.sPartID.Trim,V.Local.sFilter)
+	F.Data.DataView.Create("dtInv","dvCheck",22,V.Local.sFilter,"")
+	F.Intrinsic.Control.If(V.DataView.dtInv!dvCheck.RowCount,=,0)
+		'we add the parts
+		'Sku = part numbers in GS
+		F.Intrinsic.String.Build("/json/variants/[{0}]/sku",V.Local.iLine,V.Local.sTemp)
+		F.Communication.JSON.SetProperty("XPath",V.Local.sTemp)
+		F.Communication.JSON.ReadProperty("XText",V.Local.sTemp)
+		F.Intrinsic.String.Replace(V.Local.sTemp,V.Ambient.DblQuote,"",V.Local.sTemp)
+		F.Data.DataTable.AddRow("dtInv","WEBID",V.Local.sPartID,"INV_PART",V.Local.sTemp.Trim)
+				
+		F.Intrinsic.Math.Add(V.Local.iLine,1,V.Local.iLine)
+		F.Intrinsic.String.Build("/json/variants/[{0}]",V.Local.iLine,V.Local.sLinePath)
+		F.Communication.JSON.HasXPath(V.Local.sLinePath,V.Local.bFlag)
+	F.Intrinsic.Control.Else
+		'part was already recorded so we exit the loop and stop,since this is where we started the previous time this was ran
+		V.Local.bFlag.Set(False)
+	F.Intrinsic.Control.EndIf
+	
+	F.Data.DataView.Close("dtInv","dvCheck")
+F.Intrinsic.Control.Loop
+
+F.Intrinsic.Control.If(V.Local.iLine,<,51)
+	F.Intrinsic.Control.ExitSub
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.CallSub(PartGathering,"Page",V.Local.sPage)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.PartGathering.End
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.End
+Program.Sub.Unload.End
+
+Program.Sub.PartAssoc.Start
+F.Intrinsic.Control.Try
+
+F.ODBC.Connection!conts.OpenCompanyConnection
+
+'We are going to use this table to keep track of the data we already have. 
+F.Data.DataTable.CreateFromSQL("dtInv","conts","Select WEBID,INV_PART from GCG_5844_INV_ASSOC",True)
+
+F.ODBC.Connection!conts.Close
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.PartAssoc.End
+
+Program.Sub.SaveInfo.Start
+F.Intrinsic.Control.Try
+
+F.ODBC.Connection!conts.OpenCompanyConnection
+
+F.Data.DataTable.SaveToDB("dtInv","conts","GCG_5844_INV_ASSOC","WEBID")
+
+F.ODBC.Connection!conts.Execute("insert into GCG_5844_INV_ASSOC (WEBID,INV_PART) values ('','999-99999-999')")
+
+F.ODBC.Connection!conts.Close
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.SaveInfo.End
+
+Program.Sub.Error.Start
+V.Local.sError.Declare
+V.Local.iRet.Declare
+V.Local.sSep.Declare
+
+F.Intrinsic.String.Build("-------------------------------------------------------------------------------------",,V.Local.sSep)
+F.Intrinsic.String.Build("({5}-{6}){0}{7}{0}Project: {4}{0}{7}{0}Sub: {1}{0}Error: {2},{3}",V.Ambient.NewLine,V.Args.SubRoutine,V.Args.eNumber,V.Args.eDescription,V.Caller.ScriptFile,V.Ambient.Date,V.Ambient.Time,V.Local.sSep,V.Local.sError)
+F.Intrinsic.UI.Msgbox(V.Local.sError,"Error",V.Local.iRet)
+F.Intrinsic.Control.CallSub(Unload)
+Program.Sub.Error.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8769.31171$}$1
+${$6$}$cmarrujo$}$20240304094906211$}$yxxTc4J0hhG8pMUhFx4xl/gNGjcI+JM63KW/msl9EpKSULvOc2Cz/UYmk8Mt3x5vUx2v03jwZWOWM/hUWc5WQg==
+Program.Sub.Comments.End
